@@ -1,9 +1,19 @@
-import Card from "./components/Card";
+import CategorySection from "./components/home/CategorySection";
+import FeaturedProducts from "./components/home/FeaturedProducts";
+import Footer from "./components/home/Footer";
+import Hero from "./components/home/Hero";
+import Navbar from "./components/home/Navbar";
+import NewArrivals from "./components/home/NewArrivals";
 
 export default function Home() {
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <Card />
-    </div>
+    <>
+      <Navbar />
+      <Hero />
+      <CategorySection />
+      <NewArrivals />
+      <FeaturedProducts />
+      <Footer />
+    </>
   );
 }
