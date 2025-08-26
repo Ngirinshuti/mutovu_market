@@ -64,10 +64,9 @@ export default function ProductCard({ product, onAddToCart }: Props) {
             onClick={handleAdd}
             disabled={adding}
             aria-label={`Add ${product.name} to cart`}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary text-green-400 px-4 py-2 font-medium shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#007A7A] text-white px-4 py-2 font-medium shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <ShoppingCart className="h-4 w-4 text-red-600" />
-            {adding ? "Adding..." : "Add to Cart"}
+        {adding ? "Adding..." : "Add to Cart"}
           </motion.button>
         </div>
       </div>
