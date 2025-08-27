@@ -10,19 +10,24 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
             return [permission() for permission in self.permission_classes]
         return []
+    
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return JsonResponse(serializer.data, safe=False)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        return JsonResponse(serializer.data, status=201)  # HTTP 201 Created
+        return JsonResponse({'message':'User created successfully'},serializer.data, status=201)  # HTTP 201 Created
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
-        return JsonResponse(serializer.data, status=200)
+        return JsonResponse({'message':'User updated successfully'},serializer.data, status=200)
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         self.perform_destroy(instance)

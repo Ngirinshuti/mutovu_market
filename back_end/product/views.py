@@ -54,6 +54,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         brand = request.query_params.get('brand', None)
         min_price = request.query_params.get('min_price', None)
         max_price = request.query_params.get('max_price', None)
+        new_arrivals = request.query_params.get('new_arrivals', None)
         search = request.query_params.get('search', None)
         
         
@@ -65,6 +66,8 @@ class ProductViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(price__gte=min_price)
         if max_price:
             queryset = queryset.filter(price__lte=max_price)
+        if new_arrivals and new_arrivals.lower() == 'true':
+            queryset = queryset.order_by('-created_at')
         if search:
             queryset = queryset.filter(name__icontains=search)
         
