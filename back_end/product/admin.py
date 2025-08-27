@@ -18,36 +18,35 @@ admin.site.index_title = "Welcome to Mutovu Market Administration"
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('name', 'brand', 'category','image', 'created_at')
-    list_filter = ('brand', 'category', 'sizes','colors', 'created_at')
-    search_fields = ('name', 'description', 'category__name', 'brand__name')
-    filter_horizontal = ('sizes', 'colors')
+    list_display = ('name', 'category', 'brand', 'created_at')
+    list_filter = ('brand', 'category', 'created_at')
+    search_fields = ('name', 'category__name', 'brand__name')
     list_editable = []
     readonly_fields = ('created_at', 'updated_at')
 
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
-    list_display = ('name', 'created_at')
-    search_fields = ('name', 'description')
+    list_display = ('brandName', 'created_at')
+    search_fields = ('brandName', 'description')
     readonly_fields = ('created_at', 'updated_at')
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'created_at')
-    search_fields = ('name', 'description')
+    list_display = ('categoryName', 'created_at')
+    search_fields = ('categoryName', 'description')
     readonly_fields = ('created_at', 'updated_at')
 
 @admin.register(Size)
 class SizeAdmin(admin.ModelAdmin):
-    list_display = ('productName', 'size', 'price', 'category', 'quantity')
-    list_filter = ('category',)
-    search_fields = ('productName',)
+    list_display = ('product', 'size','price','quantity','description','created_at')
+    list_filter = ('size','price','product__name','created_at')
+    search_fields = ('product__name','size')
     readonly_fields = ('created_at', 'updated_at')
 
 @admin.register(Color)
 class ColorAdmin(admin.ModelAdmin):
-    list_display = ('productName', 'hex_code', 'created_at')
-    search_fields = ('productName',)
+    list_display = ('product', 'hex_code','colorName','created_at')
+    search_fields = ('product__name','hex_code','colorName')
     readonly_fields = ('created_at', 'updated_at')
 
 @admin.register(Review)

@@ -3,7 +3,7 @@ from rest_framework import serializers
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username', 'first_name', 'last_name', 'password', 'email', 'phone_number', 'role', 'profile_picture', 'bio', 'is_verified', 'is_active', 'is_staff', 'date_joined', 'last_login']
+        fields = '__all__'
         read_only_fields = ['id', 'date_joined', 'last_login']
     
     def validate_role(self, value):

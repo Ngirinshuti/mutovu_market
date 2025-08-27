@@ -2,11 +2,8 @@ from django.db import models
 class Product(models.Model):
     id= models.AutoField(primary_key=True)
     name = models.CharField(max_length=255)
-    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
-    sizes = models.ManyToManyField('Size', blank=True, related_name='products')
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=False, related_name='products')
     category = models.ForeignKey('Category', on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
-    colors = models.ManyToManyField('Color', blank=True, related_name='products')
-    image = models.ImageField(upload_to='product_images/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -19,9 +16,8 @@ class Product(models.Model):
 
 class Size(models.Model):
     id= models.AutoField(primary_key=True)
-    productName = models.CharField(max_length=50)
+    product= models.ForeignKey(Product, on_delete=models.CASCADE, related_name='sizes')
     size = models.PositiveIntegerField(blank=True, null=True)
-    category = models.ForeignKey('Category', on_delete=models.SET_NULL, null=True, blank=True, related_name='sizes')
     price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     quantity = models.PositiveIntegerField(default=0, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
@@ -31,12 +27,30 @@ class Size(models.Model):
     class Meta:
         verbose_name = 'Size'
         verbose_name_plural = 'Sizes'
-        ordering = ['size','productName','price']
+        ordering = ['size']
     def __str__(self):
-        return str(self.size) if self.productName is not None else "Unnamed Size"
+        return f"Size for {self.product}" if self.product is not None else "Unnamed Size"
+
+class Image(models.Model):
+    id= models.AutoField(primary_key=True)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
+    frontImage = models.ImageField(upload_to='product_images/', blank=True, null=True)
+    backImage = models.ImageField(upload_to='product_images/', blank=True, null=True)
+    sideImage = models.ImageField(upload_to='product_images/', blank=True, null=True)
+    aerialImage = models.ImageField(upload_to='product_images/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Image'
+        verbose_name_plural = 'Images'
+        ordering = ['frontImage']
+    def __str__(self):
+        return f"Image for {self.product}" if self.product is not None else "Unnamed Image"
 class Color(models.Model):
     id= models.AutoField(primary_key=True)
-    productName = models.CharField(max_length=50)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='colors')
+    colorName = models.CharField(max_length=100, blank=True, null=True)
     hex_code = models.CharField(max_length=7, blank=True, null=True)  # e.g., #FFFFFF
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -44,13 +58,13 @@ class Color(models.Model):
     class Meta:
         verbose_name = 'Color'
         verbose_name_plural = 'Colors'
-        ordering = ['productName']
+        ordering = ['colorName']
     def __str__(self):
-        return str(self.hex_code) if self.productName is not None else "Unnamed Color"
+        return f"Color for {self.product}" if self.product is not None else "Unnamed Color"
 
 class Category(models.Model):
     id= models.AutoField(primary_key=True)
-    name = models.CharField(max_length=255)
+    categoryName = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     image = models.ImageField(upload_to='category_images/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -59,13 +73,13 @@ class Category(models.Model):
     class Meta:
         verbose_name = 'Category'
         verbose_name_plural = 'Categories'
-        ordering = ['name']
+        ordering = ['categoryName']
     def __str__(self):
-        return str(self.name) if self.name is not None else "Unnamed Category"
+        return str(self.categoryName) if self.name is not None else "Unnamed Category"
 
 class Brand(models.Model):
     id= models.AutoField(primary_key=True)
-    name = models.CharField(max_length=255)
+    brandName = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     image = models.ImageField(upload_to='brand_images/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -74,9 +88,9 @@ class Brand(models.Model):
     class Meta:
         verbose_name = 'Brand'
         verbose_name_plural = 'Brands'
-        ordering = ['name']
+        ordering = ['brandName']
     def __str__(self):
-        return str(self.name) if self.name is not None else "Unnamed Brand"
+        return str(self.brandName) if self.brandName is not None else "Unnamed Brand"
 class Review(models.Model):
     id= models.AutoField(primary_key=True)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
