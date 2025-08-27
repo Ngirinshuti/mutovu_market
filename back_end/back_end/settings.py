@@ -93,7 +93,7 @@ DATABASES = {
         'NAME': config('DB_NAME'),
         'USER': config('DB_USER'),
         'PASSWORD': config('DB_PASSWORD'),
-        'HOST': config('DB_HOST', default='localhost'),
+        'HOST': config('DB_HOST', default='postgresql://admin:b2DMddqx2IwuUsF9qz1n4JNzdpbusBCf@dpg-d2ng7d7fte5s739ddpk0-a.oregon-postgres.render.com/mutovu'),
         'PORT': config('DB_PORT', default='5432'),
     }
 }
