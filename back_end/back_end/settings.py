@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-nq(99x07im_%ut_$edqm$&ksr*@8ra4edj^t5ut)337bnyolhx
 DEBUG = True
 
 ALLOWED_HOSTS = [
-    'mutovu-market.onrender.com',
+    'mutovu-market.onrender.com'
 ]
 # Application definition
 AUTH_USER_MODEL = 'User.User'
