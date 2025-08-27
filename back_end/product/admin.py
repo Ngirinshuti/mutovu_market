@@ -18,9 +18,9 @@ admin.site.index_title = "Welcome to Mutovu Market Administration"
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category', 'brand', 'created_at')
+    list_display = ('name', 'category', 'brand__brandName', 'created_at')
     list_filter = ('brand', 'category', 'created_at')
-    search_fields = ('name', 'category__name', 'brand__name')
+    search_fields = ('name', 'category__categoryName', 'brand__brandName')
     list_editable = []
     readonly_fields = ('created_at', 'updated_at')
 
@@ -38,9 +38,9 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Size)
 class SizeAdmin(admin.ModelAdmin):
-    list_display = ('product', 'size','price','quantity','description','created_at')
-    list_filter = ('size','price','product__name','created_at')
-    search_fields = ('product__name','size')
+    list_display = ('size','price','quantity','description','created_at')
+    list_filter = ('size','price','created_at')
+    search_fields = ('price','size')
     readonly_fields = ('created_at', 'updated_at')
 
 @admin.register(Color)

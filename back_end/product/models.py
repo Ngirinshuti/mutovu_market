@@ -29,15 +29,15 @@ class Size(models.Model):
         verbose_name_plural = 'Sizes'
         ordering = ['size']
     def __str__(self):
-        return f"Size for {self.product}" if self.product is not None else "Unnamed Size"
+        return f"Size for {self.size}" if self.size is not None else "Unnamed Size"
 
 class Image(models.Model):
     id= models.AutoField(primary_key=True)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='images')
-    frontImage = models.ImageField(upload_to='product_images/', blank=True, null=True)
-    backImage = models.ImageField(upload_to='product_images/', blank=True, null=True)
-    sideImage = models.ImageField(upload_to='product_images/', blank=True, null=True)
-    aerialImage = models.ImageField(upload_to='product_images/', blank=True, null=True)
+    frontImage = models.ImageField(upload_to='./product/images/front_images/', blank=True, null=True)
+    backImage = models.ImageField(upload_to='./product/images/back_images/', blank=True, null=True)
+    sideImage = models.ImageField(upload_to='./product/images/side_images/', blank=True, null=True)
+    aerialImage = models.ImageField(upload_to='./product/images/aerial_images/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -66,7 +66,7 @@ class Category(models.Model):
     id= models.AutoField(primary_key=True)
     categoryName = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
-    image = models.ImageField(upload_to='category_images/', blank=True, null=True)
+    image = models.ImageField(upload_to='./product/images/category_images/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -81,7 +81,7 @@ class Brand(models.Model):
     id= models.AutoField(primary_key=True)
     brandName = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
-    image = models.ImageField(upload_to='brand_images/', blank=True, null=True)
+    image = models.ImageField(upload_to='./product/images/brand_images/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
