@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
-
+import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -27,6 +27,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = [
     'mutovu-market.onrender.com',
+    '127.0.0.1',
 ]
 # Application definition
 AUTH_USER_MODEL = 'User.User'
@@ -87,17 +88,19 @@ WSGI_APPLICATION = 'back_end.wsgi.application'
 
 from decouple import config
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': config('DB_NAME'),
+#         'USER': config('DB_USER'),
+#         'PASSWORD': config('DB_PASSWORD'),
+#         'HOST': config('DB_HOST', default='postgresql://admin:b2DMddqx2IwuUsF9qz1n4JNzdpbusBCf@dpg-d2ng7d7fte5s739ddpk0-a.oregon-postgres.render.com/mutovu'),
+#         'PORT': config('DB_PORT', default='5432'),
+#     }
+# }
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME'),
-        'USER': config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
-        'HOST': config('DB_HOST', default='postgresql://admin:b2DMddqx2IwuUsF9qz1n4JNzdpbusBCf@dpg-d2ng7d7fte5s739ddpk0-a.oregon-postgres.render.com/mutovu'),
-        'PORT': config('DB_PORT', default='5432'),
-    }
+    'default': dj_database_url.parse(config('DATABASE_URL'))
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
