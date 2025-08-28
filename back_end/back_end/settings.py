@@ -23,8 +23,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-nq(99x07im_%ut_$edqm$&ksr*@8ra4edj^t5ut)337bnyolhx'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
+# DEBUG = True
+DEBUG = False
 ALLOWED_HOSTS = [
     'mutovu-market.onrender.com',
     '127.0.0.1',
@@ -94,7 +94,7 @@ from decouple import config
 #         'NAME': config('DB_NAME'),
 #         'USER': config('DB_USER'),
 #         'PASSWORD': config('DB_PASSWORD'),
-#         'HOST': config('DB_HOST', default='postgresql://admin:b2DMddqx2IwuUsF9qz1n4JNzdpbusBCf@dpg-d2ng7d7fte5s739ddpk0-a.oregon-postgres.render.com/mutovu'),
+#         'HOST': config('DB_HOST', default='localhost'),
 #         'PORT': config('DB_PORT', default='5432'),
 #     }
 # }
@@ -155,3 +155,13 @@ CORS_ALLOW_METHODS = (
     "POST",
     "PUT",
 )
+
+
+import os
+CSRF_TRUSTED_ORIGINS = [
+    'https://mutovu-market.onrender.com',
+    # Add any other domains you need
+]
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}",
+] if os.environ.get('RENDER_EXTERNAL_HOSTNAME') else []
