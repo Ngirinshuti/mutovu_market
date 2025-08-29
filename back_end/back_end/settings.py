@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
-import dj_database_url
+# import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -23,8 +23,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-nq(99x07im_%ut_$edqm$&ksr*@8ra4edj^t5ut)337bnyolhx'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# DEBUG = True
-DEBUG = False
+DEBUG = True
+# DEBUG = False
 ALLOWED_HOSTS = [
     'mutovu-market.onrender.com',
     '127.0.0.1',
@@ -88,19 +88,19 @@ WSGI_APPLICATION = 'back_end.wsgi.application'
 
 from decouple import config
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': config('DB_NAME'),
-#         'USER': config('DB_USER'),
-#         'PASSWORD': config('DB_PASSWORD'),
-#         'HOST': config('DB_HOST', default='localhost'),
-#         'PORT': config('DB_PORT', default='5432'),
-#     }
-# }
 DATABASES = {
-    'default': dj_database_url.parse(config('DATABASE_URL'))
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': config('DB_NAME'),
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST': config('DB_HOST', default='localhost'),
+        'PORT': config('DB_PORT', default='5432'),
+    }
 }
+# DATABASES = {
+#     'default': dj_database_url.parse(config('DATABASE_URL'))
+# }
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -157,11 +157,11 @@ CORS_ALLOW_METHODS = (
 )
 
 
-import os
-CSRF_TRUSTED_ORIGINS = [
-    'https://mutovu-market.onrender.com',
-    # Add any other domains you need
-]
-CSRF_TRUSTED_ORIGINS = [
-    f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}",
-] if os.environ.get('RENDER_EXTERNAL_HOSTNAME') else []
+# import os
+# CSRF_TRUSTED_ORIGINS = [
+#     'https://mutovu-market.onrender.com',
+#     # Add any other domains you need
+# ]
+# CSRF_TRUSTED_ORIGINS = [
+#     f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}",
+# ] if os.environ.get('RENDER_EXTERNAL_HOSTNAME') else []
