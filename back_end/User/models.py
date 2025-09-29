@@ -3,7 +3,7 @@ from django.contrib.auth.models import AbstractUser
 
 class User(AbstractUser):
     phone_number = models.CharField(max_length=15, blank=True, null=True)
-    role = models.CharField(max_length=20, choices=[('admin', 'Admin'), ('customer', 'Customer'), ('Buyer', 'Buyer'), ('seller', 'Seller'), ('deliverer', 'Deliverer')
+    role = models.CharField(max_length=20, choices=[('admin', 'Admin'), ('customer', 'Customer'), ('seller', 'Seller'), ('deliverer', 'Deliverer')
     ], default='customer')
     profile_picture = models.ImageField(upload_to='./User/profile_pictures/', blank=True, null=True)
     bio = models.TextField(blank=True, null=True)

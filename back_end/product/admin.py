@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Product, Size, Color, Category, Brand, Review, Order, CartItem, WishlistItem,ProductSize, ProductColor,ProductImage
+from .models import Product, Size, Color, Category, Brand, Review, Order, CartItem, WishlistItem,ProductImage,Shop,ProductVariant,Delivery
 
 admin.site.site_header = "Mutovu Market Administration"
 admin.site.site_title = "Mutovu Market Admin Portal"
@@ -13,6 +13,13 @@ class ProductAdmin(admin.ModelAdmin):
     list_filter = ('brand', 'category', 'created_at')
     search_fields = ('name', 'category', 'brand')
     list_editable = []
+    readonly_fields = ('created_at', 'updated_at')
+
+@admin.register(ProductVariant)
+class ProductVariantAdmin(admin.ModelAdmin):
+    list_display = ('product', 'size', 'color', 'quantity', 'price', 'created_at')
+    list_filter = ('product', 'size', 'color', 'created_at')
+    search_fields = ('product__name', 'size__custom_size', 'color__color_name')
     readonly_fields = ('created_at', 'updated_at')
 
 @admin.register(Brand)
@@ -38,24 +45,6 @@ class SizeAdmin(admin.ModelAdmin):
 class ColorAdmin(admin.ModelAdmin):
     list_display = ('color_name','hex_code','created_at')
     search_fields = ('color_name','hex_code')
-    readonly_fields = ('created_at', 'updated_at')
-
-@admin.register(ProductSize)
-class ProductSizeAdmin(admin.ModelAdmin):
-    # Corrected list_filter to use foreign key field 'product' instead of related field 'product__name'
-    # Corrected search_fields to correctly reference `size` fields
-    list_display = ('product', 'size', 'quantity','price', 'created_at') # Changed 'product__name' to 'product' for clarity. Django will still display the product name.
-    list_filter = ('product',)
-    search_fields = ('product',)
-    readonly_fields = ('created_at', 'updated_at')
-
-@admin.register(ProductColor)
-class ProductColorAdmin(admin.ModelAdmin):
-    # Corrected list_filter to use foreign key field 'product'
-    # Corrected search_fields to use 'color__color_name'
-    list_display = ('product', 'color','price_modifier', 'created_at') # Changed 'product__name' to 'product'
-    list_filter = ('product',)
-    search_fields = ('product', 'color')
     readonly_fields = ('created_at', 'updated_at')
 
 @admin.register(Review)
@@ -84,3 +73,16 @@ class WishlistItemAdmin(admin.ModelAdmin):
     list_display = ('user', 'product', 'added_at')
     list_filter = ('added_at',)
     search_fields = ('user__username', 'product__name')
+@admin.register(Shop)
+class ShopAdmin(admin.ModelAdmin):
+    list_display = ('owner', 'name', 'location', 'created_at')
+    list_filter = ('created_at',)
+    search_fields = ('owner__username', 'name', 'location')
+    readonly_fields = ('created_at', 'updated_at')  
+
+# @admin.register(Delivery)
+# class DeliveryAdmin(admin.ModelAdmin):
+#     list_display = ('order', 'deliverer', 'status', 'assigned_at')
+#     list_filter = ('status', 'assigned_at')
+#     search_fields = ('order__id', 'deliverer__username')
+#     readonly_fields = ('assigned_at', 'updated_at') 
