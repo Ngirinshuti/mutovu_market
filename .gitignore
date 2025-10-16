@@ -150,3 +150,19 @@ media/
 # Static files collected by Django
 staticfiles/
 static/
+
+
+# settings.py file
+back_end/settings.py
+# back_end/settings.py --- IGNORE ---
+
+# ignore .env file
+back_end/.env
+/node_modules
+front_end/node_modules/@next/swc-darwin-x64/next-swc.darwin-x64.node
+
+# Ignore kluster.ai Verify Code rules
+.github/instructions/kluster-code-verify.instructions.md
+
+
+.kluster
