@@ -10,7 +10,8 @@ from datetime import timedelta, datetime, time
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
 from django.contrib.gis.db.models.functions import Distance
-
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.pagination import PageNumberPagination
 from product.models import (
     Product, Shop, Size, Color, Category, Brand, Review, Order, 
     CartItem, WishlistItem, ProductVariant, ProductImage, Delivery
@@ -21,36 +22,243 @@ from .serializers import (
     CartItemSerializer, WishlistItemSerializer, ProductVariantSerializer,
     ProductImageSerializer, ProductCreateSerializer, ProductVariantCreateSerializer,
     BulkVariantCreateSerializer, BulkPriceUpdateSerializer, VariantStatsSerializer,
-    ProductStatsSerializer, VariantSearchSerializer, DeliverySerializer
-)
+    ProductStatsSerializer, VariantSearchSerializer, DeliverySerializer, DeliveryCreateSerializer , ProductListSerializer,ShopCreateSerializer)
+
+
+
+# NEW: Custom Pagination Class (Request #1)
+class StandardResultsPagination(PageNumberPagination):
+    # Set a default page size and allow client to override
+    page_size = 10 
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    pagination_class = StandardResultsPagination  # Use custom pagination
     filterset_fields = ['shop', 'category', 'brand', 'is_active']
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'created_at', 'updated_at']
     ordering = ['-created_at']
     
+    def get_permissions(self):
+        """
+        Allow anyone to view products (list, retrieve)
+        Require authentication for modifications (create, update, delete)
+        """
+        if self.action in ['list', 'retrieve', 'variants', 'stats', 'catalog']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+    
     def get_serializer_class(self):
-        if self.action == 'create':
+        """Use ProductListSerializer for catalog, keep others as-is"""
+        if self.action == 'catalog':  # NEW: Use enhanced serializer for catalog
+            return ProductListSerializer
+        elif self.action == 'create':
             return ProductCreateSerializer
+        elif self.action == 'list':
+            return ProductListSerializer
         return ProductSerializer
     
+    def get_serializer_context(self):
+        """
+        Passes the request context to the serializer.
+        This is necessary for SerializerMethodFields (like image_url) 
+        to build absolute URIs.
+        """
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
     def get_queryset(self):
-        queryset = Product.objects.select_related('shop', 'category', 'brand').prefetch_related(
-            'available_sizes', 'available_colors', 'variants', 'variants__size', 'variants__color', 'images'
-        )
+        """
+        ENHANCED: Added prefetch_related for better performance
+        Keeps all your existing seller/customer/staff logic
+        """
+        # Add prefetch for better performance
+        queryset = Product.objects.filter(is_active=True).order_by('-created_at')
+        queryset = queryset.annotate(
+            min_price=Min('variants__price'),
+            max_price=Max('variants__price'),
+            total_stock=Sum('variants__quantity')
+        ).distinct() # Use distinct to prevent duplicates from joins
         
-        # Filter by user's shops if not admin
-        if not self.request.user.is_staff:
+        # Annotate with average rating
+        queryset = queryset.annotate(
+            avg_rating=Avg('reviews__rating'),
+            review_count=Count('reviews')
+        )
+        # queryset = queryset.select_related(
+        #     'shop', 'shop__owner', 'category', 'brand'
+        # ).prefetch_related(
+        #     'available_sizes', 
+        #     'available_colors', 
+        #     'variants',
+        #     'variants__size',
+        #     'variants__color',
+        #     'variants__images',  # NEW: Prefetch variant images
+        #     'images',
+        #     'reviews'  # NEW: Prefetch reviews for rating calculation
+        # )
+        
+        # Keep your existing permission logic exactly as-is
+        if self.request.user.is_staff:
+            return queryset
+        
+        if self.request.user.is_authenticated:
             user_shops = Shop.objects.filter(owner=self.request.user)
-            queryset = queryset.filter(shop__in=user_shops)
             
+            if user_shops.exists():
+                queryset = queryset.filter(shop__in=user_shops)
+            else:
+                queryset = queryset.filter(is_active=True)
+        else:
+            queryset = queryset.filter(is_active=True)
+        
         return queryset
+    
+    
+    @action(detail=True, methods=['post'], parser_classes=(MultiPartParser, FormParser))
+    def upload_images(self, request, pk=None):
+        """
+        FIXED: Upload images and link them to a specific variant
+        Expects: variant_id in the request data
+        """
+        product = self.get_object()
+        
+        # Get the variant ID from request
+        variant_id = request.data.get('variant_id')
+        
+        if not variant_id:
+            return Response(
+                {'detail': 'variant_id is required to upload images'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verify the variant belongs to this product
+        try:
+            variant = ProductVariant.objects.get(id=variant_id, product=product)
+        except ProductVariant.DoesNotExist:
+            return Response(
+                {'detail': 'Variant not found for this product'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Gather the four image files
+        front_image = request.FILES.get('front_image')
+        back_image = request.FILES.get('back_image')
+        side_image = request.FILES.get('side_image')
+        aerial_image = request.FILES.get('aerial_image')
+        
+        # At least one image is required
+        if not any([front_image, back_image, side_image, aerial_image]):
+            return Response(
+                {'detail': 'At least one image is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Construct the data for ProductImage
+        data = {
+            'variant': variant.id,  # Link to the variant, not product
+            'front_image': front_image,
+            'back_image': back_image,
+            'side_image': side_image,
+            'aerial_image': aerial_image,
+            'is_primary': request.data.get('is_primary', False)
+        }
+        
+        # Use ProductImageSerializer to validate and save
+        serializer = ProductImageSerializer(data=data, context={'request': request})
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        
+    
+    
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
+    def catalog(self, request):
+        """
+        NEW ENDPOINT: Enhanced catalog endpoint for frontend
+        Returns fully aggregated product data with ratings, prices, stock, images
+        URL: /api/products/catalog
+        """
+        # Use the existing queryset logic (respects seller/customer permissions)
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # Apply additional filters from query params
+        category = request.query_params.get('category')
+        brand = request.query_params.get('brand')
+        min_price = request.query_params.get('min_price')
+        max_price = request.query_params.get('max_price')
+        in_stock = request.query_params.get('in_stock')
+        
+        # Filter by category
+        if category and category != 'All':
+            try:
+                queryset = queryset.filter(category_id=int(category))
+            except (ValueError, TypeError):
+                pass
+        
+        # Filter by brand
+        if brand and brand != 'All':
+            try:
+                queryset = queryset.filter(brand_id=int(brand))
+            except (ValueError, TypeError):
+                pass
+        
+        # Filter by price range (annotate min price from variants)
+        if min_price or max_price:
+            from django.db.models import Min as DbMin
+            queryset = queryset.annotate(
+                min_variant_price=DbMin('variants__price')
+            )
+            if min_price:
+                try:
+                    queryset = queryset.filter(min_variant_price__gte=float(min_price))
+                except (ValueError, TypeError):
+                    pass
+            if max_price:
+                try:
+                    queryset = queryset.filter(min_variant_price__lte=float(max_price))
+                except (ValueError, TypeError):
+                    pass
+        
+        # Filter by stock availability
+        if in_stock == 'true':
+            queryset = queryset.annotate(
+                total_quantity=Sum('variants__quantity')
+            ).filter(total_quantity__gt=0)
+        
+        # CRITICAL FIX: Prefetch images to avoid N+1 queries
+        queryset = queryset.prefetch_related(
+        'variants',
+        'variants__size',
+        'variants__color',
+        'variants__product__shop',
+        'category',
+        'brand',
+        'shop'
+    )
+        
+        
+        # Use pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
     
     @action(detail=True, methods=['get'])
     def variants(self, request, pk=None):
@@ -183,11 +391,21 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
     queryset = ProductVariant.objects.all()
     serializer_class = ProductVariantSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsPagination  # Use custom pagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['product', 'size', 'color', 'is_active', 'product__shop', 'product__category']
     search_fields = ['product__name', 'sku', 'description']
     ordering_fields = ['price', 'quantity', 'created_at']
     ordering = ['-created_at']
+    
+    
+    def get_permissions(self):
+        """Allow read-only access for unauthenticated users"""
+        if self.action in ['list', 'retrieve', 'search', 'stats']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -195,16 +413,49 @@ class ProductVariantViewSet(viewsets.ModelViewSet):
         return ProductVariantSerializer
     
     def get_queryset(self):
+        """
+        FIXED: Use prefetch_related for 'images' (reverse relation)
+        Keeps all your existing permission logic
+        """
         queryset = ProductVariant.objects.select_related(
-            'product', 'product__shop', 'product__category', 'product__brand', 'size', 'color'
+            'product', 
+            'product__shop', 
+            'product__shop__owner',
+            'product__category', 
+            'product__brand', 
+            'size', 
+            'color'
+        ).prefetch_related(
+            'images',  # FIXED: Changed from select_related to prefetch_related
+            'product__reviews'
         )
         
-        # Filter by user's shops if not admin
-        if not self.request.user.is_staff:
+        # Staff sees everything
+        if self.request.user.is_staff:
+            print("Staff user - returning all")
+            return queryset
+
+        # For authenticated users, check if they are sellers
+        if self.request.user.is_authenticated:
             user_shops = Shop.objects.filter(owner=self.request.user)
-            queryset = queryset.filter(product__shop__in=user_shops)
-            
-        return queryset
+            print(f"User shops count: {user_shops.count()}")
+        
+            # Sellers see only their shop's variants
+            if user_shops.exists():
+                filtered = queryset.filter(product__shop__in=user_shops)
+                print(f"Seller - filtered to their shops: {filtered.count()}")
+                return filtered
+            # Customers see all active variants
+            else:
+                filtered = queryset.filter(is_active=True, product__is_active=True)
+                print(f"Customer - filtered active: {filtered.count()}")
+                return filtered
+        else:
+            # Anonymous users see all active variants
+            filtered = queryset.filter(is_active=True, product__is_active=True)
+            print(f"Anonymous - filtered active: {filtered.count()}")
+            print("=" * 50)
+            return filtered
     
     @action(detail=False, methods=['post'])
     def bulk_update_prices(self, request):
@@ -359,6 +610,14 @@ class SizeViewSet(viewsets.ModelViewSet):
     ordering_fields = ['size_type', 'numeric_size', 'alpha_size', 'created_at']
     ordering = ['size_type', 'numeric_size', 'alpha_size']
     
+    def get_permissions(self):
+        """Allow read for all, require auth for create/update/delete"""
+        if self.action in ['list', 'retrieve']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+    
     @action(detail=False, methods=['get'])
     def by_category(self, request):
         """Get sizes compatible with a specific category"""
@@ -383,6 +642,13 @@ class ColorViewSet(viewsets.ModelViewSet):
     search_fields = ['color_name']
     ordering_fields = ['color_name', 'created_at']
     ordering = ['color_name']
+    
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
@@ -393,6 +659,15 @@ class CategoryViewSet(viewsets.ModelViewSet):
     search_fields = ['category_name', 'description']
     ordering_fields = ['category_name', 'created_at']
     ordering = ['category_name']
+    
+    
+    def get_permissions(self):
+        """Allow read-only access for unauthenticated users"""
+        if self.action in ['list', 'retrieve', 'compatible_sizes']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
     
     @action(detail=True, methods=['get'])
     def compatible_sizes(self, request, pk=None):
@@ -411,6 +686,53 @@ class BrandViewSet(viewsets.ModelViewSet):
     search_fields = ['brand_name', 'description']
     ordering_fields = ['brand_name', 'created_at']
     ordering = ['brand_name']
+    
+    def get_permissions(self):
+        """Allow read-only access for unauthenticated users"""
+        if self.action in ['list', 'retrieve']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+    
+    def get_queryset(self):
+        queryset = Brand.objects.all()
+    
+        # Staff sees all brands
+        if self.request.user.is_staff:
+            return queryset
+    
+        # For authenticated sellers with shops, filter brands by their products
+        if self.request.user.is_authenticated:
+            user_shops = Shop.objects.filter(owner=self.request.user)
+        
+            if user_shops.exists():
+                # Sellers see brands used in their shops
+                queryset = queryset.filter(products__shop__in=user_shops).distinct()
+            # Customers and anonymous users see all brands
+    
+        return queryset
+    
+    def perform_create(self, serializer):
+        # Prevent creating duplicate brands
+        brand_name = serializer.validated_data.get('brand_name')
+        if Brand.objects.filter(brand_name__iexact=brand_name).exists():
+            raise BrandSerializer.ValidationError("Brand with this name already exists.")
+        serializer.save()
+    
+    def perform_destroy(self, instance):
+        # Prevent deletion if brand has associated products
+        if instance.products.exists():
+            raise BrandSerializer.ValidationError("Cannot delete brand with associated products.")
+        instance.delete()
+    
+    def perform_update(self, serializer):
+        # Prevent changing brand name to an existing brand's name
+        new_name = serializer.validated_data.get('brand_name', instance.brand_name)
+        if Brand.objects.exclude(id=serializer.instance.id).filter(brand_name=new_name).exists():
+            raise BrandSerializer.ValidationError("Brand name must be unique.")
+        serializer.save()
+
 
 
 class ProductImageViewSet(viewsets.ModelViewSet):
@@ -435,6 +757,7 @@ class ShopViewSet(viewsets.ModelViewSet):
     queryset = Shop.objects.all()
     serializer_class = ShopSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsPagination  # Use custom pagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'description', 'address']
     ordering_fields = ['name', 'created_at']
@@ -545,7 +868,6 @@ class ShopViewSet(viewsets.ModelViewSet):
 
 
     @action(detail=False, methods=['get'])
-
     def nearby(self, request):
 
         """Get shops within a specified radius of a location."""
@@ -753,59 +1075,39 @@ class ShopViewSet(viewsets.ModelViewSet):
 
 
     @action(detail=False, methods=['post'])
-
     def create_shop(self, request):
-
         """Create a new shop for the current user."""
-
         if not request.user.is_authenticated:
-
             return Response(
-
                 {'message': 'Authentication required'},
-
                 status=status.HTTP_401_UNAUTHORIZED
-
             )
-
-        
-
-        serializer = self.get_serializer(data=request.data)
-
-        if serializer.is_valid():
-
-            # Automatically assign the shop to the current user
-
-            shop = serializer.save(owner=request.user)
-
-            return Response(
-
-                {
-
-                    'message': 'Shop created successfully',
-
-                    'data': ShopSerializer(shop).data
-
-                },
-
-                status=status.HTTP_201_CREATED
-
-            )
-
-        return Response(
-
-            {
-
-                'message': 'Error creating shop',
-
-                'errors': serializer.errors
-
-            },
-
-            status=status.HTTP_400_BAD_REQUEST
-
-        )
     
+    # CRITICAL FIX: Use ShopCreateSerializer instead of ShopSerializer
+        serializer = ShopCreateSerializer(data=request.data)
+    
+        if serializer.is_valid():
+        # Automatically assign the shop to the current user
+            shop = serializer.save(owner=request.user)
+        
+        # Use ShopSerializer for the response to include all fields
+            response_serializer = ShopSerializer(shop, context={'request': request})
+        
+            return Response(
+                {
+                'message': 'Shop created successfully',
+                'data': response_serializer.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+    
+        return Response(
+            {
+            'message': 'Error creating shop',
+            'errors': serializer.errors
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
     @action(detail=True, methods=['get'])
     def products(self, request, pk=None):
         """Get all products for a specific shop"""
@@ -850,6 +1152,64 @@ class ShopViewSet(viewsets.ModelViewSet):
         }
         
         return Response(stats)
+    
+    def destroy(self, request, *args, **kwargs):
+        """
+       Delete a shop - only owner or staff can delete
+        """
+        try:
+            shop = self.get_object()
+        
+            # Check permissions - only shop owner or staff can delete
+            if not request.user.is_staff and shop.owner != request.user:
+                return Response(
+                    {'message': 'Permission denied. You can only delete your own shops.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+            # Check if shop has products
+            product_count = Product.objects.filter(shop=shop).count()
+            if product_count > 0:
+                return Response(
+                    {
+                        'message': f'Cannot delete shop. It has {product_count} associated products.',
+                        'error': 'Please delete all products before deleting the shop.'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+            # Check if shop has orders
+            order_count = Order.objects.filter(variant__product__shop=shop).count()
+            if order_count > 0:
+                return Response(
+                    {
+                        'message': f'Cannot delete shop. It has {order_count} associated orders.',
+                        'error': 'Shops with order history cannot be deleted.'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+            # Delete the shop
+            shop_name = shop.name
+            shop.delete()
+        
+            return Response(
+                {
+                    'message': f'Shop "{shop_name}" deleted successfully',
+                    'success': True
+                },
+                status=status.HTTP_200_OK
+            )
+        
+        except Exception as e:
+            print(f"DEBUG: Error deleting shop: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        
+            return Response(
+                {'message': 'Error deleting shop', 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class ReviewViewSet(viewsets.ModelViewSet):
@@ -866,202 +1226,95 @@ class ReviewViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
-
-
-# class OrderViewSet(viewsets.ModelViewSet):
-#     queryset = Order.objects.all()
-#     serializer_class = OrderSerializer  # Use the updated serializer
-#     permission_classes = [IsAuthenticated]
-#     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-#     filterset_fields = ['status', 'variant', 'variant__product', 'variant__product__shop', 'user']
-#     ordering_fields = ['created_at', 'updated_at', 'total_price']
-#     ordering = ['-created_at']
-    
-#     def get_queryset(self):
-#         """Get orders with proper filtering and debugging"""
-#         queryset = Order.objects.select_related(
-#             'user', 'variant', 'variant__product', 'variant__product__shop',
-#             'variant__size', 'variant__color'
-#         )
-        
-#         print(f"DEBUG OrderViewSet: User {self.request.user.id} requesting orders")
-#         print(f"DEBUG OrderViewSet: Query params: {dict(self.request.query_params)}")
-        
-#         # Filter based on user role
-#         if self.request.user.is_staff:
-#             print("DEBUG OrderViewSet: Staff user - returning all orders")
-#             return queryset
-#         else:
-#             # Get user's shops
-#             user_shops = Shop.objects.filter(owner=self.request.user)
-#             print(f"DEBUG OrderViewSet: User owns {user_shops.count()} shops: {[s.id for s in user_shops]}")
-            
-#             if user_shops.exists():
-#                 # Shop owners see orders for their products + their own orders as customers
-#                 shop_orders = queryset.filter(variant__product__shop__in=user_shops)
-#                 user_orders = queryset.filter(user=self.request.user)
-                
-#                 print(f"DEBUG OrderViewSet: Shop orders count: {shop_orders.count()}")
-#                 print(f"DEBUG OrderViewSet: User orders count: {user_orders.count()}")
-                
-#                 # Use union to combine querysets
-#                 combined_queryset = shop_orders.union(user_orders)
-#                 print(f"DEBUG OrderViewSet: Combined orders count: {combined_queryset.count()}")
-#                 return combined_queryset
-#             else:
-#                 # Regular users see only their orders
-#                 user_orders = queryset.filter(user=self.request.user)
-#                 print(f"DEBUG OrderViewSet: Regular user orders count: {user_orders.count()}")
-#                 return user_orders
-    
-#     def list(self, request, *args, **kwargs):
-#         """Override list to add debugging and handle shop filtering"""
-#         print(f"DEBUG OrderViewSet.list: Called by user {request.user.id}")
-#         print(f"DEBUG OrderViewSet.list: Query params: {dict(request.query_params)}")
-        
-#         # Check if filtering by specific shop
-#         shop_filter = request.query_params.get('variant__product__shop')
-#         if shop_filter:
-#             print(f"DEBUG OrderViewSet.list: Filtering by shop {shop_filter}")
-            
-#             # Verify user owns this shop or is staff
-#             try:
-#                 shop = Shop.objects.get(id=shop_filter)
-#                 if shop.owner != request.user and not request.user.is_staff:
-#                     return Response(
-#                         {'error': 'You do not have permission to view orders for this shop'},
-#                         status=status.HTTP_403_FORBIDDEN
-#                     )
-#                 print(f"DEBUG OrderViewSet.list: User has permission for shop {shop_filter}")
-#             except Shop.DoesNotExist:
-#                 return Response(
-#                     {'error': 'Shop not found'},
-#                     status=status.HTTP_404_NOT_FOUND
-#                 )
-        
-#         # Get the filtered queryset
-#         queryset = self.filter_queryset(self.get_queryset())
-#         print(f"DEBUG OrderViewSet.list: Final queryset count: {queryset.count()}")
-        
-#         # Print some sample orders for debugging
-#         if queryset.count() > 0:
-#             sample_orders = queryset[:3]
-#             for order in sample_orders:
-#                 print(f"DEBUG Order sample: ID={order.id}, User={order.user.username}, "
-#                       f"Product={order.variant.product.name}, Shop={order.variant.product.shop.name}")
-        
-#         page = self.paginate_queryset(queryset)
-#         if page is not None:
-#             serializer = self.get_serializer(page, many=True)
-#             response = self.get_paginated_response(serializer.data)
-#             print(f"DEBUG OrderViewSet.list: Returning paginated response with {len(serializer.data)} orders")
-#             return response
-
-#         serializer = self.get_serializer(queryset, many=True)
-#         print(f"DEBUG OrderViewSet.list: Returning non-paginated response with {len(serializer.data)} orders")
-#         return Response(serializer.data)
-    
-#     def perform_create(self, serializer):
-#         """Auto-assign user when creating order"""
-#         serializer.save(user=self.request.user)
-
 class OrderViewSet(viewsets.ModelViewSet):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsPagination
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    # Allow filtering by status, or any other fields relevant to Order model
     filterset_fields = ['status'] 
     ordering_fields = ['created_at', 'total_price']
     ordering = ['-created_at']
 
     def get_queryset(self):
         user = self.request.user
-        
-        # 1. Base QuerySet for orders where the user is the BUYER
-        buyer_orders_qs = Order.objects.filter(user=user).select_related(
-            'user', 'variant__product__shop', 'variant__size', 'variant__color'
-        )
-        
-        # 2. Base QuerySet for orders where the user is the SELLER (via the shop owner)
-        seller_orders_qs = Order.objects.filter(
-            variant__product__shop__owner=user
-        ).select_related(
-            'user', 'variant__product__shop', 'variant__size', 'variant__color'
-        )
-
-        # 3. CRITICAL FIX: Extract and apply the shop filter BEFORE union()
+    
+        # Check if filtering by shop (seller view)
         shop_id = self.request.query_params.get('variant__product__shop')
-        
+    
         if shop_id:
-            # The shop filter only applies to the seller's view of orders
-            # (i.e., orders for one of their shops).
-            # We must apply it to the seller_orders_qs before combining.
-            seller_orders_qs = seller_orders_qs.filter(
-                variant__product__shop=shop_id
-            )
-            
-            # When filtering by shop, we assume the user only wants to see 
-            # orders related to that shop (seller view), so we exclude buyer orders.
-            # If the user is viewing their shop's dashboard, they aren't looking 
-            # for orders they've placed elsewhere.
-            final_queryset = seller_orders_qs 
-        else:
-            # If no specific shop is provided, combine both buyer and seller orders
-            # Note: order_by must be applied AFTER union for compatibility
-            final_queryset = seller_orders_qs.union(buyer_orders_qs).order_by('-created_at')
+            # Seller viewing orders for a specific shop
+            try:
+                shop = Shop.objects.get(id=shop_id, owner=user)
+                return Order.objects.filter(
+                    variant__product__shop=shop
+                ).select_related(
+                    'user', 'variant__product__shop', 'variant__size', 'variant__color',
+                    'variant__product', 'variant__product__brand', 'variant__product__category'
+                ).prefetch_related(
+                    'variant__images'
+                ).order_by('-created_at')
+            except Shop.DoesNotExist:
+                return Order.objects.none()
+    
+        # No shop filter - return buyer's orders (customer view)
+        return Order.objects.filter(
+            user=user
+        ).select_related(
+            'user', 'variant__product__shop', 'variant__size', 'variant__color',
+            'variant__product', 'variant__product__brand', 'variant__product__category'
+        ).prefetch_related(
+            'variant__images'
+        ).order_by('-created_at')
+        
+    def list(self, request, *args, **kwargs):
+        """Override list to handle pagination correctly"""
+        queryset = self.filter_queryset(self.get_queryset())
 
-        # 4. Apply other filters (like status) now, as DRF's FilterBackend 
-        # (DjangoFilterBackend) handles this for the final queryset.
-        # This allows the client to still filter the final result by status or date.
-        return final_queryset
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+    
     @action(detail=False, methods=['get'])
     def available_for_delivery(self, request):
         """
         Orders that are confirmed/processing and do not yet have an active Delivery object.
-        This action is for deliverers to see work.
         """
-        # The key is to build the specific QuerySet without relying on the generic 
-        # union-based get_queryset(), as union prevents subsequent complex filtering.
-
-        # 1. Identify orders ready to be delivered (confirmed, processing, or shipped)
         orders_ready = Order.objects.filter(
             status__in=['confirmed', 'processing', 'shipped']
         ).select_related(
-            'user', 'variant__product__shop', 'variant__size', 'variant__color'
-        )
+            'user', 'variant__product__shop', 'variant__size', 'variant__color',
+            'variant__product'
+        ).prefetch_related('variant__images')
         
-        # 2. Identify orders that already have an associated active delivery
         orders_with_delivery = Delivery.objects.filter(
             status__in=['accepted', 'pending', 'picked_up']
         ).values_list('order_id', flat=True)
 
-        # 3. Exclude orders that already have an active delivery
-        # This is the necessary filter to be applied to the base QuerySet
         final_queryset = orders_ready.exclude(
             id__in=orders_with_delivery
         ).order_by('created_at')
         
-        # 4. Apply location-based filtering if coordinates are provided (for deliverer use)
         latitude = request.query_params.get('latitude')
         longitude = request.query_params.get('longitude')
-        radius = request.query_params.get('radius_km', 10) # Default 10km
+        radius = request.query_params.get('radius_km', 10)
 
         if latitude and longitude:
             try:
                 center_point = Point(float(longitude), float(latitude), srid=4326)
                 
-                # Filter orders whose shop is within the radius
                 final_queryset = final_queryset.filter(
                     variant__product__shop__location__distance_lte=(center_point, D(km=radius))
                 ).annotate(
                     distance=Distance('variant__product__shop__location', center_point)
-                ).order_by('distance') # Order by distance to prioritize nearby orders
+                ).order_by('distance')
 
             except (ValueError, TypeError):
-                # Handle invalid coordinates gracefully
                 pass
 
-        # 5. Serialize and return
         page = self.paginate_queryset(final_queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -1069,21 +1322,71 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(final_queryset, many=True)
         return Response(serializer.data)
-
+    
+    def perform_create(self, serializer):
+        """
+        Auto-assign authenticated user when creating order
+        FIX: Reduce variant quantity when order is created
+        """
+        order = serializer.save(user=self.request.user)
+        
+        # Reduce variant quantity
+        variant = order.variant
+        if variant.quantity >= order.quantity:
+            variant.quantity -= order.quantity
+            variant.save()
+        else:
+            # Rollback if insufficient stock
+            order.delete()
+            raise serializers.ValidationError({
+                'quantity': f'Insufficient stock. Only {variant.quantity} items available.'
+            })
+    
+    @action(detail=True, methods=['post'])
+    def create_order(self, request, pk=None):
+        """Create a new order for a specific product variant"""
+        variant = self.get_object()
+        quantity = request.data.get('quantity', 1)
+        
+        if variant.quantity < int(quantity):
+            return Response(
+                {'error': 'Insufficient stock for this variant'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        order = Order.objects.create(
+            user=self.request.user,
+            variant=variant,
+            quantity=quantity,
+            unit_price=variant.price,
+            total_price=variant.price * int(quantity),
+            status='pending'
+        )
+        
+        # Reduce stock
+        variant.quantity -= int(quantity)
+        variant.save()
+        
+        serializer = self.get_serializer(order)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class CartItemViewSet(viewsets.ModelViewSet):
     queryset = CartItem.objects.all()
     serializer_class = CartItemSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsPagination
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['variant', 'variant__product']
     
     def get_queryset(self):
         return CartItem.objects.filter(user=self.request.user).select_related(
             'variant', 'variant__product', 'variant__size', 'variant__color'
+        ).prefetch_related(
+            'variant__images'  # Add this to prefetch images
         )
     
     def perform_create(self, serializer):
+        
         serializer.save(user=self.request.user)
     
     @action(detail=False, methods=['get'])
@@ -1126,6 +1429,8 @@ class WishlistItemViewSet(viewsets.ModelViewSet):
             'message': f'Removed {deleted_count} items from wishlist'
         })
 
+# Complete fixed DeliveryViewSet - Replace in views.py
+
 class DeliveryViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing deliveries
@@ -1147,47 +1452,73 @@ class DeliveryViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """
-        Filter deliveries based on user role:
+        Filter deliveries based on user role - FIXED to avoid union() issues
         - Staff: see all deliveries
         - Deliverers: see their assigned deliveries
         - Shop owners: see deliveries for their shop orders
         """
         user = self.request.user
         
+        # Staff sees everything
         if user.is_staff:
             return Delivery.objects.all().select_related(
-                'order', 'order__variant__product__shop', 'deliverer', 'order__user'
+                'order', 'order__variant__product__shop', 'deliverer', 'order__user',
+                'order__variant', 'order__variant__product', 'order__variant__size', 
+                'order__variant__color', 'order__variant__product__category',
+                'order__variant__product__brand'
+            ).prefetch_related(
+                'order__variant__images'
             )
         
-        # Get deliveries assigned to this user (as deliverer)
-        deliverer_deliveries = Delivery.objects.filter(deliverer=user)
+        # Use Q objects to combine filters without union()
+        filter_conditions = Q(deliverer=user)  # Deliveries assigned to this user
         
-        # Get deliveries for shops owned by this user
+        # Add shop owner condition
         user_shops = Shop.objects.filter(owner=user)
-        shop_deliveries = Delivery.objects.filter(
-            order__variant__product__shop__in=user_shops
-        )
+        if user_shops.exists():
+            filter_conditions |= Q(order__variant__product__shop__in=user_shops)
         
-        # Combine both querysets
-        combined = deliverer_deliveries.union(shop_deliveries).order_by('-created_at')
-        
-        return combined
+        # Return combined queryset with proper select_related
+        return Delivery.objects.filter(
+            filter_conditions
+        ).select_related(
+            'order', 'order__variant__product__shop', 'deliverer', 'order__user',
+            'order__variant', 'order__variant__product', 'order__variant__size', 
+            'order__variant__color', 'order__variant__product__category',
+            'order__variant__product__brand'
+        ).prefetch_related(
+            'order__variant__images'
+        ).distinct().order_by('-created_at')
     
     @action(detail=False, methods=['get'])
     def my_deliveries(self, request):
-        """Get deliveries assigned to the current user (as deliverer)"""
+        """
+        Get deliveries assigned to the current user (as deliverer)
+        ENHANCED: Better prefetching and response structure
+        """
         deliveries = Delivery.objects.filter(
             deliverer=request.user
         ).select_related(
-            'order', 'order__variant__product__shop', 'order__user',
-            'order__variant__product', 'order__variant__size', 'order__variant__color'
+            'order',
+            'order__user',
+            'order__variant',
+            'order__variant__product',
+            'order__variant__product__shop',
+            'order__variant__product__category',
+            'order__variant__product__brand',
+            'order__variant__size',
+            'order__variant__color',
+            'deliverer'
+        ).prefetch_related(
+            'order__variant__images'
         ).order_by('-created_at')
         
         # Filter by status if provided
         status_filter = request.query_params.get('status')
-        if status_filter:
+        if status_filter and status_filter != 'all':
             deliveries = deliveries.filter(status=status_filter)
         
+        # Paginate results
         page = self.paginate_queryset(deliveries)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -1240,13 +1571,13 @@ class DeliveryViewSet(viewsets.ModelViewSet):
         
         # Serialize the orders
         from .serializers import OrderSerializer
-        serializer = OrderSerializer(available_orders, many=True)
+        serializer = OrderSerializer(available_orders, many=True, context={'request': request})
         
         # Add distance to response if calculated
         if lat and lng:
             for i, order_data in enumerate(serializer.data):
                 if i < len(available_orders) and hasattr(available_orders[i], 'distance'):
-                    order_data['distance_km'] = round(available_orders[i].distance.km, 2)
+                    order_data['distance'] = round(available_orders[i].distance.km, 2)
         
         return Response({
             'count': available_orders.count(),
@@ -1312,56 +1643,77 @@ class DeliveryViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def update_status(self, request, pk=None):
-        """Update delivery status"""
-        delivery = self.get_object()
-        new_status = request.data.get('status')
-        
-        valid_statuses = ['accepted', 'picked_up', 'in_transit', 'delivered', 'cancelled', 'failed']
-        
-        if not new_status or new_status not in valid_statuses:
+        """Update delivery status - FIXED to work with Q-filtered queryset"""
+        try:
+            # Get delivery with explicit query to avoid union() issues
+            delivery = Delivery.objects.select_related(
+                'order', 'order__variant__product__shop', 'deliverer'
+            ).get(pk=pk)
+            
+            # Check permission - deliverer or staff can update
+            if delivery.deliverer != request.user and not request.user.is_staff:
+                # Also check if user is shop owner
+                if not Shop.objects.filter(
+                    owner=request.user, 
+                    products__variants__orders=delivery.order
+                ).exists():
+                    return Response(
+                        {'error': 'You do not have permission to update this delivery'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            
+            new_status = request.data.get('status')
+            
+            valid_statuses = ['accepted', 'picked_up', 'in_transit', 'delivered', 'cancelled', 'failed']
+            
+            if not new_status or new_status not in valid_statuses:
+                return Response(
+                    {'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            old_status = delivery.status
+            delivery.status = new_status
+            
+            # Update timestamps
+            if new_status == 'picked_up' and not delivery.pickup_time:
+                delivery.pickup_time = timezone.now()
+            elif new_status == 'delivered' and not delivery.delivery_time:
+                delivery.delivery_time = timezone.now()
+                # Calculate actual delivery time
+                if delivery.pickup_time:
+                    time_diff = delivery.delivery_time - delivery.pickup_time
+                    delivery.actual_time = int(time_diff.total_seconds() / 60)
+            
+            delivery.save()
+            
+            # Update order status accordingly
+            order = delivery.order
+            if new_status == 'picked_up':
+                order.status = 'shipped'
+            elif new_status == 'delivered':
+                order.status = 'delivered'
+            elif new_status in ['cancelled', 'failed']:
+                order.status = 'cancelled'
+                order.deliverer = None
+            order.save()
+            
+            serializer = self.get_serializer(delivery)
+            return Response({
+                'message': f'Delivery status updated from {old_status} to {new_status}',
+                'data': serializer.data
+            })
+            
+        except Delivery.DoesNotExist:
             return Response(
-                {'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'error': 'Delivery not found'},
+                status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Check permission
-        if delivery.deliverer != request.user and not request.user.is_staff:
+        except Exception as e:
             return Response(
-                {'error': 'You do not have permission to update this delivery'},
-                status=status.HTTP_403_FORBIDDEN
+                {'error': f'Error updating delivery: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
-        old_status = delivery.status
-        delivery.status = new_status
-        
-        # Update timestamps
-        if new_status == 'picked_up' and not delivery.pickup_time:
-            delivery.pickup_time = timezone.now()
-        elif new_status == 'delivered' and not delivery.delivery_time:
-            delivery.delivery_time = timezone.now()
-            # Calculate actual delivery time
-            if delivery.pickup_time:
-                time_diff = delivery.delivery_time - delivery.pickup_time
-                delivery.actual_time = int(time_diff.total_seconds() / 60)
-        
-        delivery.save()
-        
-        # Update order status accordingly
-        order = delivery.order
-        if new_status == 'picked_up':
-            order.status = 'shipped'
-        elif new_status == 'delivered':
-            order.status = 'delivered'
-        elif new_status in ['cancelled', 'failed']:
-            order.status = 'cancelled'
-            order.deliverer = None
-        order.save()
-        
-        serializer = self.get_serializer(delivery)
-        return Response({
-            'message': f'Delivery status updated from {old_status} to {new_status}',
-            'data': serializer.data
-        })
     
     @action(detail=True, methods=['post'])
     def mark_picked_up(self, request, pk=None):
@@ -1478,105 +1830,4 @@ class DeliveryViewSet(viewsets.ModelViewSet):
                 'completed': completed_week,
                 'earnings': float(earnings_week)
             }
-        })
-    
-    @action(detail=False, methods=['get'])
-    def active(self, request):
-        """Get active deliveries (in progress) for current user"""
-        active_deliveries = Delivery.objects.filter(
-            deliverer=request.user,
-            status__in=['accepted', 'picked_up', 'in_transit']
-        ).select_related(
-            'order', 'order__variant__product__shop', 'order__user'
-        ).order_by('created_at')
-        
-        serializer = self.get_serializer(active_deliveries, many=True)
-        return Response({
-            'count': active_deliveries.count(),
-            'data': serializer.data
-        })
-    
-    @action(detail=False, methods=['get'])
-    def history(self, request):
-        """Get delivery history for current user"""
-        # Filter by date range if provided
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        
-        history = Delivery.objects.filter(
-            deliverer=request.user,
-            status__in=['delivered', 'cancelled', 'failed']
-        ).select_related(
-            'order', 'order__variant__product__shop'
-        )
-        
-        if start_date:
-            try:
-                start = datetime.strptime(start_date, '%Y-%m-%d')
-                history = history.filter(created_at__gte=start)
-            except ValueError:
-                pass
-        
-        if end_date:
-            try:
-                end = datetime.strptime(end_date, '%Y-%m-%d')
-                history = history.filter(created_at__lte=end)
-            except ValueError:
-                pass
-        
-        history = history.order_by('-delivery_time')
-        
-        page = self.paginate_queryset(history)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        
-        serializer = self.get_serializer(history, many=True)
-        return Response({
-            'count': history.count(),
-            'data': serializer.data
-        })
-    
-    @action(detail=False, methods=['get'])
-    def earnings(self, request):
-        """Get detailed earnings breakdown"""
-        period = request.query_params.get('period', 'all')  # all, today, week, month
-        
-        deliveries = Delivery.objects.filter(
-            deliverer=request.user,
-            status='delivered'
-        )
-        
-        now = timezone.now()
-        
-        if period == 'today':
-            deliveries = deliveries.filter(delivery_time__date=now.date())
-        elif period == 'week':
-            week_start = now - timedelta(days=7)
-            deliveries = deliveries.filter(delivery_time__gte=week_start)
-        elif period == 'month':
-            month_start = now - timedelta(days=30)
-            deliveries = deliveries.filter(delivery_time__gte=month_start)
-        
-        total_earnings = deliveries.aggregate(
-            total=Sum('delivery_fee')
-        )['total'] or 0
-        
-        total_deliveries = deliveries.count()
-        avg_per_delivery = (total_earnings / total_deliveries) if total_deliveries > 0 else 0
-        
-        # Breakdown by day for the period
-        daily_earnings = deliveries.values(
-            'delivery_time__date'
-        ).annotate(
-            earnings=Sum('delivery_fee'),
-            count=Count('id')
-        ).order_by('delivery_time__date')
-        
-        return Response({
-            'period': period,
-            'total_earnings': float(total_earnings),
-            'total_deliveries': total_deliveries,
-            'average_per_delivery': float(avg_per_delivery),
-            'daily_breakdown': list(daily_earnings)
         })
