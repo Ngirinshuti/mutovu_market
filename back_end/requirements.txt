@@ -6,6 +6,7 @@ dill==0.4.0
 dj-database-url==3.0.1
 Django==5.2.5
 django-cors-headers==4.7.0
+django-filter==25.1
 django-stubs==5.2.2
 django-stubs-ext==5.2.2
 djangorestframework==3.16.1
