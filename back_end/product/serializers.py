@@ -1,6 +1,6 @@
 from product.models import (
     Product, Shop, Size, Color, Category, Brand, Review, Order, 
-    CartItem, WishlistItem, ProductVariant, ProductImage, Delivery
+    CartItem, WishlistItem, ProductVariant, ProductImage, Delivery,SubCategory
 )
 from rest_framework import serializers
 from rest_framework_gis.serializers import GeometryField
@@ -45,13 +45,26 @@ class ShopBasicSerializer(serializers.ModelSerializer):
     def get_longitude(self, obj):
         return obj.longitude
 
-
+class SubCategorySerializer(serializers.ModelSerializer):
+    """Serializer for SubCategory"""
+    category_name = serializers.CharField(source='category.category_name', read_only=True)
+    
+    class Meta:
+        model = SubCategory
+        fields = ['id', 'category', 'category_name', 'subcategory_name', 'description', 'image', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+        
 class CategorySerializer(serializers.ModelSerializer):
+    subcategories = SubCategorySerializer(many=True, read_only=True)
+    subcategory_count = serializers.SerializerMethodField()
+    
     class Meta:
         model = Category
-        fields = ['id', 'category_name', 'description', 'image', 'size_type', 'created_at', 'updated_at']
+        fields = ['id', 'category_name', 'description', 'image', 'size_type', 'subcategories', 'subcategory_count', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
-
+    
+    def get_subcategory_count(self, obj):
+        return obj.subcategories.count()
 
 class BrandSerializer(serializers.ModelSerializer):
     class Meta:
@@ -216,6 +229,7 @@ class ProductSerializer(serializers.ModelSerializer):
     """Standard product serializer"""
     brand = BrandSerializer(read_only=True)
     category = CategorySerializer(read_only=True)
+    subcategory = SubCategorySerializer(read_only=True)  # NEW
     shop = ShopBasicSerializer(read_only=True)
     variants = ProductVariantSerializer(many=True, read_only=True)
     available_sizes = SizeSerializer(many=True, read_only=True)
@@ -230,7 +244,7 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'id', 'name', 'description', 'brand', 'category', 'shop',
+            'id', 'name', 'description', 'brand', 'category', 'subcategory', 'shop',  # Added subcategory
             'variants', 'available_sizes', 'available_colors', 'is_active',
             'avg_rating', 'review_count', 'min_price', 'max_price',
             'total_stock', 'variant_count', 'created_at', 'updated_at'
@@ -262,19 +276,34 @@ class ProductCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Product
-        fields = ['id', 'name', 'description', 'brand', 'category', 'shop', 'is_active', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'description', 'brand', 'category', 'subcategory', 'shop', 'is_active', 'created_at', 'updated_at']  # Added subcategory
         read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {
             'shop': {'required': True},
             'category': {'required': True},
             'brand': {'required': True},
+            'subcategory': {'required': False},  # Optional
         }
+    
+    def validate(self, data):
+        """Validate that subcategory belongs to category if provided"""
+        category = data.get('category')
+        subcategory = data.get('subcategory')
+        
+        if subcategory and category:
+            if subcategory.category_id != category.id:
+                raise serializers.ValidationError({
+                    'subcategory': f'Subcategory must belong to the selected category: {category.category_name}'
+                })
+        
+        return data
 
 
 class ProductListSerializer(serializers.ModelSerializer):
     """Enhanced product serializer for catalog/list views"""
     shop = ShopBasicSerializer(read_only=True)
     category = serializers.SerializerMethodField()
+    subcategory = serializers.SerializerMethodField()  # NEW
     brand = serializers.SerializerMethodField()
     avg_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
@@ -287,7 +316,7 @@ class ProductListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
-            'id', 'name', 'description', 'category', 'brand', 'shop',
+            'id', 'name', 'description', 'category', 'subcategory', 'brand', 'shop',  # Added subcategory
             'variants', 'avg_rating', 'review_count', 'min_price', 'max_price',
             'total_stock', 'variant_count', 'is_active', 'created_at'
         ]
@@ -295,6 +324,16 @@ class ProductListSerializer(serializers.ModelSerializer):
     def get_category(self, obj):
         if obj.category:
             return {'id': obj.category.id, 'name': obj.category.category_name}
+        return None
+    
+    def get_subcategory(self, obj):
+        """NEW: Return subcategory info"""
+        if obj.subcategory:
+            return {
+                'id': obj.subcategory.id, 
+                'name': obj.subcategory.subcategory_name,
+                'category_id': obj.subcategory.category_id
+            }
         return None
     
     def get_brand(self, obj):
@@ -320,7 +359,6 @@ class ProductListSerializer(serializers.ModelSerializer):
     
     def get_variant_count(self, obj):
         return obj.variants.count()
-
 
 # ============================================================================
 # REVIEW SERIALIZERS

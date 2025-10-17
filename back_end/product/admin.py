@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Product, Size, Color, Category, Brand, Review, Order, CartItem, WishlistItem,ProductImage,Shop,ProductVariant,Delivery
+from .models import Product, Size, Color, Category, Brand, Review, Order, CartItem, WishlistItem,ProductImage,Shop,ProductVariant,Delivery,SubCategory
 
 admin.site.site_header = "Mutovu Market Administration"
 admin.site.site_title = "Mutovu Market Admin Portal"
@@ -33,7 +33,12 @@ class CategoryAdmin(admin.ModelAdmin):
     list_display = ('category_name','size_type', 'created_at')
     search_fields = ('category_name','size_type', 'description')
     readonly_fields = ('created_at', 'updated_at')
-
+    
+@admin.register(SubCategory)
+class SubCategoryAdmin(admin.ModelAdmin):
+    list_display = ('subcategory_name','category', 'description', 'created_at')
+    search_fields = ('subcategory_name','category')
+    readonly_fields = ('created_at', 'updated_at')
 @admin.register(Size)
 class SizeAdmin(admin.ModelAdmin):
     list_display = ('size_type','numeric_size','alpha_size','custom_size','created_at')

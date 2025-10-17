@@ -14,7 +14,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.pagination import PageNumberPagination
 from product.models import (
     Product, Shop, Size, Color, Category, Brand, Review, Order, 
-    CartItem, WishlistItem, ProductVariant, ProductImage, Delivery
+    CartItem, WishlistItem, ProductVariant, ProductImage, Delivery,SubCategory
 )
 from .serializers import (
     ProductSerializer, ShopSerializer, SizeSerializer, ColorSerializer,
@@ -22,7 +22,7 @@ from .serializers import (
     CartItemSerializer, WishlistItemSerializer, ProductVariantSerializer,
     ProductImageSerializer, ProductCreateSerializer, ProductVariantCreateSerializer,
     BulkVariantCreateSerializer, BulkPriceUpdateSerializer, VariantStatsSerializer,
-    ProductStatsSerializer, VariantSearchSerializer, DeliverySerializer, DeliveryCreateSerializer , ProductListSerializer,ShopCreateSerializer)
+    ProductStatsSerializer, VariantSearchSerializer, DeliverySerializer, DeliveryCreateSerializer , ProductListSerializer,ShopCreateSerializer,SubCategorySerializer)
 
 
 
@@ -78,8 +78,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """
-        ENHANCED: Added prefetch_related for better performance
-        Keeps all your existing seller/customer/staff logic
+        ENHANCED: Added subcategory filtering support
         """
         # Add prefetch for better performance
         queryset = Product.objects.filter(is_active=True).order_by('-created_at')
@@ -87,25 +86,16 @@ class ProductViewSet(viewsets.ModelViewSet):
             min_price=Min('variants__price'),
             max_price=Max('variants__price'),
             total_stock=Sum('variants__quantity')
-        ).distinct() # Use distinct to prevent duplicates from joins
+        ).distinct()
         
         # Annotate with average rating
         queryset = queryset.annotate(
             avg_rating=Avg('reviews__rating'),
             review_count=Count('reviews')
         )
-        # queryset = queryset.select_related(
-        #     'shop', 'shop__owner', 'category', 'brand'
-        # ).prefetch_related(
-        #     'available_sizes', 
-        #     'available_colors', 
-        #     'variants',
-        #     'variants__size',
-        #     'variants__color',
-        #     'variants__images',  # NEW: Prefetch variant images
-        #     'images',
-        #     'reviews'  # NEW: Prefetch reviews for rating calculation
-        # )
+        
+        # Add select_related for subcategory
+        queryset = queryset.select_related('category', 'subcategory', 'brand', 'shop')
         
         # Keep your existing permission logic exactly as-is
         if self.request.user.is_staff:
@@ -188,15 +178,13 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], permission_classes=[AllowAny])
     def catalog(self, request):
         """
-        NEW ENDPOINT: Enhanced catalog endpoint for frontend
-        Returns fully aggregated product data with ratings, prices, stock, images
-        URL: /api/products/catalog
+        ENHANCED: Added subcategory filtering
         """
-        # Use the existing queryset logic (respects seller/customer permissions)
         queryset = self.filter_queryset(self.get_queryset())
         
         # Apply additional filters from query params
         category = request.query_params.get('category')
+        subcategory = request.query_params.get('subcategory')  # NEW
         brand = request.query_params.get('brand')
         min_price = request.query_params.get('min_price')
         max_price = request.query_params.get('max_price')
@@ -209,6 +197,13 @@ class ProductViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 pass
         
+        # NEW: Filter by subcategory
+        if subcategory and subcategory != 'All':
+            try:
+                queryset = queryset.filter(subcategory_id=int(subcategory))
+            except (ValueError, TypeError):
+                pass
+        
         # Filter by brand
         if brand and brand != 'All':
             try:
@@ -216,7 +211,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             except (ValueError, TypeError):
                 pass
         
-        # Filter by price range (annotate min price from variants)
+        # Filter by price range
         if min_price or max_price:
             from django.db.models import Min as DbMin
             queryset = queryset.annotate(
@@ -239,17 +234,17 @@ class ProductViewSet(viewsets.ModelViewSet):
                 total_quantity=Sum('variants__quantity')
             ).filter(total_quantity__gt=0)
         
-        # CRITICAL FIX: Prefetch images to avoid N+1 queries
+        # Prefetch images
         queryset = queryset.prefetch_related(
-        'variants',
-        'variants__size',
-        'variants__color',
-        'variants__product__shop',
-        'category',
-        'brand',
-        'shop'
-    )
-        
+            'variants',
+            'variants__size',
+            'variants__color',
+            'variants__product__shop',
+            'category',
+            'subcategory',  # NEW
+            'brand',
+            'shop'
+        )
         
         # Use pagination
         page = self.paginate_queryset(queryset)
@@ -660,10 +655,9 @@ class CategoryViewSet(viewsets.ModelViewSet):
     ordering_fields = ['category_name', 'created_at']
     ordering = ['category_name']
     
-    
     def get_permissions(self):
         """Allow read-only access for unauthenticated users"""
-        if self.action in ['list', 'retrieve', 'compatible_sizes']:
+        if self.action in ['list', 'retrieve', 'compatible_sizes', 'subcategories']:
             permission_classes = [AllowAny]
         else:
             permission_classes = [IsAuthenticated]
@@ -676,7 +670,67 @@ class CategoryViewSet(viewsets.ModelViewSet):
         sizes = Size.objects.filter(size_type=category.size_type)
         serializer = SizeSerializer(sizes, many=True)
         return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'])
+    def subcategories(self, request, pk=None):
+        """Get all subcategories for this category"""
+        category = self.get_object()
+        subcategories = category.subcategories.all()
+        serializer = SubCategorySerializer(subcategories, many=True)
+        return Response({
+            'category': {
+                'id': category.id,
+                'name': category.category_name,
+                'size_type': category.size_type
+            },
+            'subcategories': serializer.data,
+            'count': subcategories.count()
+        })
 
+class SubCategoryViewSet(viewsets.ModelViewSet):
+    queryset = SubCategory.objects.all()
+    serializer_class = SubCategorySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['category']  # Filter subcategories by category
+    search_fields = ['subcategory_name', 'description']
+    ordering_fields = ['subcategory_name', 'created_at']
+    ordering = ['subcategory_name']
+    
+    def get_permissions(self):
+        """Allow read-only access for unauthenticated users"""
+        if self.action in ['list', 'retrieve', 'by_category']:
+            permission_classes = [AllowAny]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+    
+    @action(detail=False, methods=['get'])
+    def by_category(self, request):
+        """Get subcategories for a specific category"""
+        category_id = request.query_params.get('category')
+        if not category_id:
+            return Response(
+                {'error': 'Category ID is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            category = Category.objects.get(id=category_id)
+            subcategories = SubCategory.objects.filter(category=category)
+            serializer = self.get_serializer(subcategories, many=True)
+            return Response({
+                'category': {
+                    'id': category.id,
+                    'name': category.category_name
+                },
+                'subcategories': serializer.data
+            })
+        except Category.DoesNotExist:
+            return Response(
+                {'error': 'Category not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 class BrandViewSet(viewsets.ModelViewSet):
     queryset = Brand.objects.all()

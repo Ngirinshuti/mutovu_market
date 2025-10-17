@@ -29,6 +29,24 @@ class Category(models.Model):
     def __str__(self):
         return str(self.category_name) if self.category_name else "Unnamed Category"
 
+class SubCategory(models.Model):
+    id = models.AutoField(primary_key=True)
+    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='subcategories')
+    subcategory_name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    image = CloudinaryField('image', blank=True, null=True, folder='product/subcategories/')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'SubCategory'
+        verbose_name_plural = 'SubCategories'
+        ordering = ['subcategory_name']
+        unique_together = ['category', 'subcategory_name']
+    
+    def __str__(self):
+        return f"{self.subcategory_name} ({self.category.category_name})" if self.subcategory_name else "Unnamed SubCategory"
+
 
 class Brand(models.Model):
     id = models.AutoField(primary_key=True)
@@ -155,6 +173,7 @@ class Product(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='products')
     brand = models.ForeignKey(Brand, on_delete=models.SET_NULL, null=True, blank=False, related_name='products')
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=False, related_name='products')
+    subcategory = models.ForeignKey(SubCategory, on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
     description = models.TextField(blank=True, null=True, help_text="Detailed product description")
     
     available_sizes = models.ManyToManyField(Size, blank=True, related_name='products',
