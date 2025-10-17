@@ -11,6 +11,7 @@ django-stubs==5.2.2
 django-stubs-ext==5.2.2
 djangorestframework==3.16.1
 djangorestframework-simplejwt==5.5.1
+djangorestframework-gis==1.2.0
 gunicorn==23.0.0
 isort==6.0.1
 mccabe==0.7.0
