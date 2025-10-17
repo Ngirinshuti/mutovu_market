@@ -28,3 +28,8 @@ sqlparse==0.5.3
 tomlkit==0.13.3
 types-PyYAML==6.0.12.20250809
 typing_extensions==4.14.1
+waitress==3.0.0
+
+
+
+
